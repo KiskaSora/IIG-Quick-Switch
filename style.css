@@ -1,0 +1,211 @@
+.iigqs-fab {
+    position: fixed;
+    right: 16px;
+    bottom: 90px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #1a1a1a) 70%, transparent);
+    color: var(--SmartThemeBodyColor, #e2e2e2);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    z-index: 9998;
+    cursor: grab;
+    opacity: 0.5;
+    transition: opacity 0.15s ease, transform 0.1s ease;
+    touch-action: none;
+    user-select: none;
+}
+
+.iigqs-fab i {
+    font-size: 16px;
+    opacity: 0.9;
+}
+
+.iigqs-fab:hover,
+.iigqs-fab:active {
+    opacity: 0.95;
+    transform: scale(1.05);
+}
+
+.iigqs-panel {
+    position: fixed;
+    z-index: 9999;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    width: min(260px, calc(100vw - 16px));
+    max-height: 62vh;
+    overflow-y: auto;
+    padding: 10px 12px 12px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #1a1a1a) 92%, transparent);
+    color: var(--SmartThemeBodyColor, #e2e2e2);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+    backdrop-filter: blur(18px) saturate(1.2);
+    font-size: 13px;
+}
+
+.iigqs-section-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    opacity: 0.65;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 6px 0 2px;
+}
+
+.iigqs-section-title:first-child {
+    margin-top: 0;
+}
+
+.iigqs-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.iigqs-chip {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--SmartThemeBodyColor, #e2e2e2);
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    line-height: 1.2;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.iigqs-chip:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.iigqs-chip.iigqs-active {
+    background: var(--SmartThemeQuoteColor, #5b9dd9);
+    border-color: var(--SmartThemeQuoteColor, #5b9dd9);
+    color: #111;
+    font-weight: 600;
+}
+
+.iigqs-select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--SmartThemeBodyColor, #e2e2e2);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    font-size: 12px;
+}
+
+.iigqs-hint,
+.iigqs-empty {
+    font-size: 11.5px;
+    opacity: 0.7;
+    line-height: 1.4;
+}
+
+.iigqs-section-title-row {
+    justify-content: space-between;
+}
+
+.iigqs-section-title-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.iigqs-manage-toggle {
+    flex: 0 0 auto;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--SmartThemeBodyColor, #e2e2e2);
+    border-radius: 6px;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 10.5px;
+    opacity: 0.75;
+    padding: 0;
+    transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.iigqs-manage-toggle:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.iigqs-manage-quickactions {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 2px;
+}
+
+.iigqs-manage-quickbtn {
+    flex: 1 1 0;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--SmartThemeBodyColor, #e2e2e2);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 11.5px;
+    cursor: pointer;
+}
+
+.iigqs-manage-quickbtn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.iigqs-manage-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    /* Раньше был свой внутренний скролл (max-height + overflow-y) — получался
+       "скролл в скролле" и крошечное окошко на 1 строку. Теперь список просто
+       растягивается, и скроллится вся панель целиком (.iigqs-panel). */
+}
+
+.iigqs-manage-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13.5px;
+    padding: 9px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    line-height: 1.3;
+}
+
+.iigqs-manage-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.iigqs-manage-item input[type="checkbox"] {
+    accent-color: var(--SmartThemeQuoteColor, #5b9dd9);
+    cursor: pointer;
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+}
+
+.iigqs-panel::-webkit-scrollbar {
+    width: 5px;
+}
+
+.iigqs-panel::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+}
