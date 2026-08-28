@@ -2,11 +2,18 @@
  * IIG Quick Switch
  * Маленький плавающий виджет для быстрого переключения:
  *  - активного стиля (settings.styles / activeStyleId)
- *  - активного профиля подключения (settings.connectionPresets — «Пресеты подключения»
- * в расширении SillyImages (inline_image_gen), без открытия его большой панели настроек.
+ *  - активного профиля подключения (settings.connectionProfiles / activeConnectionProfileId —
+ *    те самые «Профили подключения» под «Настройки API») в расширении SillyImages
+ *    (inline_image_gen), без открытия его большой панели настроек.
  *
  * Ничего не патчит и не требует SillyImages как зависимость на уровне manifest —
  * просто читает/пишет тот же extensionSettings['inline_image_gen'], что и SillyImages.
+ *
+ * Синхронизировано со структурой оригинального SillyImages
+ * (https://github.com/0xl0cal/sillyimages/): ключ настроек, список полей профиля
+ * подключения (CONNECTION_FIELDS) и разметка (.iig-style-item / #iig_profile_select
+ * и т.п.) должны соответствовать src/settings.js и src/ui.js оттуда. Если апстрим
+ * поменяет эти имена/поля — их нужно будет обновить и здесь.
  */
 (function initIigQuickSwitch() {
     'use strict';
@@ -64,34 +71,47 @@
     // Если родная панель настроек SillyImages сейчас открыта в DOM, подсвечиваем
     // в ней активный стиль напрямую (публичного API у SillyImages для этого нет,
     // так что просто подкручиваем классы/иконку в её разметке — id/классы стабильны:
-    // #iig_style_presets > .iig-style-chip[.iig-style-chip-active] > .iig-style-chip-name > i.fa-check/fa-palette).
+    // #iig_style_presets > .iig-style-item[.active] > .iig-style-activation > i.fa-circle-check/fa-circle,
+    // и отдельная кнопка «Без стиля» — .iig-style-none[.active]).
     function syncMainStylePanel(activeId) {
         try {
             const container = document.getElementById('iig_style_presets');
             if (!container) return;
-            container.querySelectorAll('.iig-style-chip').forEach((chip) => {
-                const id = chip.dataset.styleId || '';
+            container.querySelectorAll('.iig-style-item').forEach((item) => {
+                const id = item.dataset.styleId || '';
                 const isActive = id === (activeId || '');
-                chip.classList.toggle('iig-style-chip-active', isActive);
-                const icon = chip.querySelector('.iig-style-chip-name i');
+                item.classList.toggle('active', isActive);
+                const icon = item.querySelector('.iig-style-activation i');
                 if (icon) {
-                    icon.classList.toggle('fa-check', isActive);
-                    icon.classList.toggle('fa-palette', !isActive);
+                    icon.classList.toggle('fa-circle-check', isActive);
+                    icon.classList.toggle('fa-circle', !isActive);
                 }
             });
+            const noStyleBtn = container.querySelector('.iig-style-none');
+            if (noStyleBtn) noStyleBtn.classList.toggle('active', !activeId);
         } catch (e) { /* родная панель могла измениться — просто не синкаем */ }
     }
 
-    // ── Пресеты подключения (settings.connectionPresets — то самое «Пресеты подключения»
-    // под «Настройки API» в SillyImages: тип API, эндпоинт, ключ, модель и т.п.) ──
+    // ── Профили подключения (settings.connectionProfiles — то самое «Профили подключения»
+    // под «Настройки API» в SillyImages: тип API, эндпоинт, ключ, модель и все
+    // provider-specific параметры генерации). Список полей должен совпадать с
+    // CONNECTION_FIELDS в src/settings.js оригинального SillyImages. ──
     const PRESET_KEYS = [
-        'apiType', 'endpoint', 'apiKey', 'model',
-        'naisteraModel', 'naisteraAspectRatio', 'aspectRatio', 'imageSize', 'size', 'quality',
-        'customRequestFormat', 'customFullUrl',
+        'apiType', 'endpoint', 'rawEndpoint', 'apiKey', 'model', 'size', 'quality',
+        'aspectRatio', 'imageSize',
+        'xaiAspectRatio', 'xaiResolution', 'xaiQuality',
+        'sendCharAvatar', 'sendUserAvatar', 'useActiveUserPersonaAvatar', 'userAvatarFile',
+        'naisteraAspectRatio', 'naisteraModel', 'naisteraCharacterDescriptionsMode',
+        'naisteraSendCharAvatar', 'naisteraSendUserAvatar', 'naisteraVideoTest', 'naisteraVideoEveryN',
+        'naisteraPolling', 'naisteraPollIntervalMs', 'naisteraPollTimeoutMs',
+        'a1111Width', 'a1111Height', 'a1111Steps', 'a1111CfgScale', 'a1111Sampler', 'a1111Scheduler',
+        'a1111Vae', 'a1111HrUpscaler', 'a1111HrScale', 'a1111DenoisingStrength', 'a1111HrSecondPassSteps',
+        'a1111ClipSkip', 'a1111RestoreFaces', 'a1111EnableHr', 'a1111AdetailerFace', 'a1111Resolution',
+        'a1111PromptPrefix', 'a1111NegativePrompt', 'a1111Seed',
     ];
 
     function getConnPresets(settings) {
-        return Array.isArray(settings.connectionPresets) ? settings.connectionPresets : [];
+        return Array.isArray(settings.connectionProfiles) ? settings.connectionProfiles : [];
     }
 
     function applyConnectionPreset(settings, preset) {
@@ -99,39 +119,40 @@
         for (const key of PRESET_KEYS) {
             if (preset[key] !== undefined) settings[key] = clone(preset[key]);
         }
-        settings.activePresetId = preset.id;
+        settings.activeConnectionProfileId = preset.id;
         saveSettings();
         syncMainPresetPanel(settings);
         return true;
     }
 
     // Если родная панель настроек SillyImages открыта — подтягиваем туда же поля
-    // подключения и текущий выбранный пресет (те же id полей, что использует сама SillyImages).
+    // подключения и текущий выбранный профиль (те же id полей, что использует сама SillyImages).
     function syncMainPresetPanel(settings) {
         try {
             const setVal = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined) el.value = val; };
             setVal('iig_api_type', settings.apiType);
             setVal('iig_endpoint', settings.endpoint);
             setVal('iig_api_key', settings.apiKey);
-            setVal('iig_custom_request_format', settings.customRequestFormat);
-            setVal('iig_custom_full_url', settings.customFullUrl);
             setVal('iig_naistera_model', settings.naisteraModel);
             setVal('iig_naistera_aspect_ratio', settings.naisteraAspectRatio);
             setVal('iig_aspect_ratio', settings.aspectRatio);
             setVal('iig_image_size', settings.imageSize);
             setVal('iig_size', settings.size);
             setVal('iig_quality', settings.quality);
-
-            const modelSel = document.getElementById('iig_model');
-            if (modelSel) {
-                modelSel.innerHTML = settings.model
-                    ? `<option value="${esc(settings.model)}" selected>${esc(settings.model)}</option>`
-                    : '<option value="">-- Выберите модель --</option>';
+            // Режим "raw endpoint": модель — обычный текстовый input (#iig_model).
+            // Иначе — выпадающий список подгруженных моделей (#iig_model_select);
+            // его список нам не переписать (нет доступа к fetch'нутым моделям),
+            // просто выставляем value, если там уже есть такая опция.
+            setVal('iig_model', settings.model);
+            const modelSel = document.getElementById('iig_model_select');
+            if (modelSel && settings.model !== undefined) {
+                const hasOption = Array.from(modelSel.options || []).some((o) => o.value === settings.model);
+                if (hasOption) modelSel.value = settings.model;
             }
 
-            const presetSel = document.getElementById('iig_preset_select');
-            if (presetSel && presetSel.value !== (settings.activePresetId || '')) {
-                presetSel.value = settings.activePresetId || '';
+            const presetSel = document.getElementById('iig_profile_select');
+            if (presetSel && presetSel.value !== (settings.activeConnectionProfileId || '')) {
+                presetSel.value = settings.activeConnectionProfileId || '';
             }
         } catch (e) { /* родная панель могла измениться — просто не синкаем */ }
     }
@@ -334,16 +355,16 @@
         let connHtml = '';
         if (presets.length) {
             connHtml = `
-                <div class="iigqs-section-title"><i class="fa-fw fa-solid fa-plug"></i> Пресет подключения</div>
+                <div class="iigqs-section-title"><i class="fa-fw fa-solid fa-plug"></i> Профиль подключения</div>
                 <select class="iigqs-select" id="iigqs-preset-select">
-                    <option value="">— выбрать пресет —</option>
-                    ${presets.map(p => `<option value="${esc(p.id)}" ${settings.activePresetId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+                    <option value="">— выбрать профиль —</option>
+                    ${presets.map(p => `<option value="${esc(p.id)}" ${settings.activeConnectionProfileId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
                 </select>
             `;
         } else {
             connHtml = `
-                <div class="iigqs-section-title"><i class="fa-fw fa-solid fa-plug"></i> Пресет подключения</div>
-                <div class="iigqs-hint">Пресетов подключения нет — создай их в настройках SillyImages («Настройки API» → «Пресеты подключения»), чтобы переключать отсюда в один тап.</div>
+                <div class="iigqs-section-title"><i class="fa-fw fa-solid fa-plug"></i> Профиль подключения</div>
+                <div class="iigqs-hint">Профилей подключения нет — создай их в настройках SillyImages («Настройки API» → «Профиль»), чтобы переключать отсюда в один тап.</div>
             `;
         }
 

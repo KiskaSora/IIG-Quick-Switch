@@ -168,7 +168,7 @@
 .iigqs-manage-quickactions {
     display: flex;
     gap: 6px;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
 }
 
 .iigqs-manage-quickbtn {
@@ -176,9 +176,9 @@
     border: 1px solid color-mix(in srgb, var(--iigqs-accent-2) 30%, rgba(255, 255, 255, 0.12));
     background: rgba(255, 255, 255, 0.04);
     color: var(--SmartThemeBodyColor, #e2e2e2);
-    border-radius: 7px;
-    padding: 5px 8px;
-    font-size: 11px;
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 11.5px;
     cursor: pointer;
 }
 
@@ -189,7 +189,7 @@
 .iigqs-manage-list {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     /* Раньше был свой внутренний скролл (max-height + overflow-y) — получался
        "скролл в скролле" и крошечное окошко на 1 строку. Теперь список просто
        растягивается, и скроллится вся панель целиком (.iigqs-panel). */
@@ -198,12 +198,12 @@
 .iigqs-manage-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    padding: 6px 8px;
-    border-radius: 7px;
+    gap: 10px;
+    font-size: 13.5px;
+    padding: 9px 8px;
+    border-radius: 8px;
     cursor: pointer;
-    line-height: 1.25;
+    line-height: 1.3;
 }
 
 .iigqs-manage-item:hover {
@@ -214,8 +214,8 @@
     accent-color: var(--iigqs-accent);
     cursor: pointer;
     flex: 0 0 auto;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
 }
 
 .iigqs-panel::-webkit-scrollbar {
