@@ -163,6 +163,42 @@
         return typeIcon ? `${typeIcon} · ${block.name || 'Блок'}` : (block.name || 'Блок');
     }
 
+    // ── Connection Profile (ExtBlocks) — выпадающий список «Connection Profile:»
+    // под API Preset в настройках ExtBlocks (не путать с «Пресетом подключения» IIG
+    // выше в этой же панели — разные сущности). Список берётся из встроенного
+    // в SillyTavern Connection Manager и привязан к текущему активному API Preset
+    // ExtBlocks (у каждого из Big/Medium/Small свой connection_profile).
+    const EXTBLOCKS_API_PRESET_NAMES = ['big', 'medium', 'small'];
+
+    function getActiveApiPresetName(ebSettings) {
+        return (ebSettings && EXTBLOCKS_API_PRESET_NAMES.includes(ebSettings.active_api_preset))
+            ? ebSettings.active_api_preset
+            : 'big';
+    }
+
+    function getConnectionManagerProfiles() {
+        const c = ctx();
+        const cm = c.extensionSettings ? c.extensionSettings.connectionManager : null;
+        return cm && Array.isArray(cm.profiles) ? cm.profiles : [];
+    }
+
+    function getExtBlocksActiveConnectionProfileName(ebSettings) {
+        const presetName = getActiveApiPresetName(ebSettings);
+        const preset = ebSettings && ebSettings.api_presets ? ebSettings.api_presets[presetName] : null;
+        return preset ? String(preset.connection_profile || '') : '';
+    }
+
+    function applyExtBlocksConnectionProfile(profileName) {
+        const select = document.getElementById('ExtBlocks-proxy-connection-profile');
+        if (!select) {
+            toast('Панель ExtBlocks ещё не готова — открой вкладку расширений, разверни «API Settings» один раз и попробуй снова.', 'error');
+            return false;
+        }
+        select.value = profileName;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+    }
+
     // Наше собственное хранилище (какие именно блоки закреплены для быстрого доступа).
     // Живёт в extensionSettings[QS], сохраняется вместе с обычными настройками ST.
     function getQsStore() {
@@ -179,6 +215,9 @@
         if (!Array.isArray(store.pinnedStyles)) {
             store.pinnedStyles = [];
         }
+        if (!Array.isArray(store.pinnedExtBlocksProfiles)) {
+            store.pinnedExtBlocksProfiles = [];
+        }
         return store;
     }
 
@@ -193,6 +232,20 @@
         const idx = store.pinnedStyles.indexOf(styleId);
         if (idx >= 0) store.pinnedStyles.splice(idx, 1);
         else store.pinnedStyles.push(styleId);
+        saveSettings();
+    }
+
+    function getPinnedExtBlocksProfileNames() {
+        const store = getQsStore();
+        return store ? store.pinnedExtBlocksProfiles : [];
+    }
+
+    function togglePinExtBlocksProfile(name) {
+        const store = getQsStore();
+        if (!store || !name) return;
+        const idx = store.pinnedExtBlocksProfiles.indexOf(name);
+        if (idx >= 0) store.pinnedExtBlocksProfiles.splice(idx, 1);
+        else store.pinnedExtBlocksProfiles.push(name);
         saveSettings();
     }
 
@@ -232,13 +285,13 @@
             const raw = localStorage.getItem(POS_KEY);
             if (!raw) return null;
             const p = JSON.parse(raw);
-            if (typeof p.right === 'number' && typeof p.bottom === 'number') return p;
+            if (typeof p.right === 'number' && typeof p.top === 'number') return p;
         } catch (e) { /* ignore */ }
         return null;
     }
 
-    function savePos(right, bottom) {
-        try { localStorage.setItem(POS_KEY, JSON.stringify({ right, bottom })); } catch (e) { /* ignore */ }
+    function savePos(right, top) {
+        try { localStorage.setItem(POS_KEY, JSON.stringify({ right, top })); } catch (e) { /* ignore */ }
     }
 
     // ── UI ──
@@ -247,6 +300,7 @@
     let panelOpen = false;
     let manageExtBlocksOpen = false; // локальный вид панели: список чипов ↔ список чекбоксов выбора
     let manageStylesOpen = false;    // то же самое, но для секции «Стиль»
+    let manageExtProfilesOpen = false; // то же самое, но для секции «Connection Profile (ExtBlocks)»
 
     function closePanel() {
         if (panel) panel.remove();
@@ -254,6 +308,7 @@
         panelOpen = false;
         manageExtBlocksOpen = false; // при следующем открытии всегда стартуем с чипов
         manageStylesOpen = false;
+        manageExtProfilesOpen = false;
         document.removeEventListener('pointerdown', onDocPointerDown, true);
         document.removeEventListener('keydown', onDocKeyDown, true);
     }
@@ -295,6 +350,8 @@
         return `
             ${renderStylesSection(settings)}
             ${connHtml}
+            <div class="iigqs-divider"></div>
+            ${renderExtBlocksProfileSection()}
             ${renderExtBlocksSection()}
         `;
     }
@@ -348,6 +405,65 @@
             body = `<div class="iigqs-chips">`
                 + `<button type="button" class="iigqs-chip ${!settings.activeStyleId ? 'iigqs-active' : ''}" data-style-id="">Без стиля</button>`
                 + pinnedStyles.map(s => `<button type="button" class="iigqs-chip ${settings.activeStyleId === s.id ? 'iigqs-active' : ''}" data-style-id="${esc(s.id)}">${esc(s.name || 'Стиль')}</button>`).join('')
+                + `</div>`;
+        }
+
+        return `${header()}${body}`;
+    }
+
+    // ── Секция «Connection Profile (ExtBlocks)»: чипы с только выбранными профилями
+    // подключения из Connection Manager + переключатель в режим «отметить нужные». ──
+    function renderExtBlocksProfileSection() {
+        const ebSettings = getExtBlocksSettings();
+        const profiles = getConnectionManagerProfiles();
+        const header = (extraTitle) => `
+            <div class="iigqs-section-title iigqs-section-title-row">
+                <span class="iigqs-section-title-label"><i class="fa-fw fa-solid fa-link"></i> Connection Profile (ExtBlocks)${extraTitle || ''}</span>
+                ${profiles.length ? `
+                    <button type="button" class="iigqs-manage-toggle" id="iigqs-extprofiles-manage-toggle"
+                        title="${manageExtProfilesOpen ? 'Готово' : 'Выбрать, какие профили показывать'}">
+                        <i class="fa-fw fa-solid ${manageExtProfilesOpen ? 'fa-check' : 'fa-gear'}"></i>
+                    </button>
+                ` : ''}
+            </div>
+        `;
+
+        if (!ebSettings) {
+            return `${header()}<div class="iigqs-hint">Расширение ExtBlocks не найдено или ещё не загрузилось.</div>`;
+        }
+        if (!profiles.length) {
+            return `${header()}<div class="iigqs-hint">В Connection Manager SillyTavern пока нет ни одного профиля.</div>`;
+        }
+
+        if (manageExtProfilesOpen) {
+            const pinned = getPinnedExtBlocksProfileNames();
+            const quickActions = profiles.length > 1 ? `
+                <div class="iigqs-manage-quickactions">
+                    <button type="button" class="iigqs-manage-quickbtn" id="iigqs-extprofiles-pin-all">Отметить все</button>
+                    <button type="button" class="iigqs-manage-quickbtn" id="iigqs-extprofiles-pin-none">Снять всё</button>
+                </div>
+            ` : '';
+            const listHtml = `${quickActions}<div class="iigqs-manage-list">`
+                + profiles.map(p => `
+                    <label class="iigqs-manage-item">
+                        <input type="checkbox" class="iigqs-extprofile-pin" data-profile-name="${esc(p.name)}" ${pinned.includes(p.name) ? 'checked' : ''}>
+                        <span>${esc(p.name || 'Профиль')}</span>
+                    </label>
+                `).join('')
+                + `</div>`;
+            return `${header(' — выбор')}${listHtml}`;
+        }
+
+        const pinnedNames = getPinnedExtBlocksProfileNames();
+        const pinnedProfiles = profiles.filter((p) => pinnedNames.includes(p.name));
+        const activeName = getExtBlocksActiveConnectionProfileName(ebSettings);
+
+        let body;
+        if (!pinnedProfiles.length) {
+            body = `<div class="iigqs-hint">Ни один профиль ещё не выбран для быстрого доступа — нажми ⚙ и отметь нужные.</div>`;
+        } else {
+            body = `<div class="iigqs-chips">`
+                + pinnedProfiles.map(p => `<button type="button" class="iigqs-chip ${activeName === p.name ? 'iigqs-active' : ''}" data-conn-profile-name="${esc(p.name)}">${esc(p.name || 'Профиль')}</button>`).join('')
                 + `</div>`;
         }
 
@@ -513,6 +629,57 @@
             });
         }
 
+        // Чипы Connection Profile (ExtBlocks) — data-conn-profile-name. Тап = переключить
+        // профиль текущего активного API Preset через нативный select ExtBlocks.
+        panel.querySelectorAll('.iigqs-chip[data-conn-profile-name]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const name = btn.dataset.connProfileName;
+                const ok = applyExtBlocksConnectionProfile(name);
+                if (ok) {
+                    closePanel();
+                    toast(`Connection Profile: ${name}`, 'success');
+                }
+            });
+        });
+
+        // Шестерёнка — переключение вида «чипы» ↔ «выбор профилей подключения для чипов»
+        const extProfilesManageToggle = panel.querySelector('#iigqs-extprofiles-manage-toggle');
+        if (extProfilesManageToggle) {
+            extProfilesManageToggle.addEventListener('click', () => {
+                manageExtProfilesOpen = !manageExtProfilesOpen;
+                refreshPanel();
+            });
+        }
+
+        // Чекбоксы выбора, какие профили подключения закрепить в быстром доступе
+        panel.querySelectorAll('.iigqs-extprofile-pin').forEach(cb => {
+            cb.addEventListener('change', () => {
+                togglePinExtBlocksProfile(cb.dataset.profileName);
+            });
+        });
+
+        // «Отметить все» / «Снять всё» в режиме выбора профилей подключения
+        const extProfilesPinAllBtn = panel.querySelector('#iigqs-extprofiles-pin-all');
+        if (extProfilesPinAllBtn) {
+            extProfilesPinAllBtn.addEventListener('click', () => {
+                const store = getQsStore();
+                if (!store) return;
+                store.pinnedExtBlocksProfiles = getConnectionManagerProfiles().map(p => p.name);
+                saveSettings();
+                refreshPanel();
+            });
+        }
+        const extProfilesPinNoneBtn = panel.querySelector('#iigqs-extprofiles-pin-none');
+        if (extProfilesPinNoneBtn) {
+            extProfilesPinNoneBtn.addEventListener('click', () => {
+                const store = getQsStore();
+                if (!store) return;
+                store.pinnedExtBlocksProfiles = [];
+                saveSettings();
+                refreshPanel();
+            });
+        }
+
         // Чипы блоков ExtBlocks — data-extblock-id. Тап = вкл/выкл этот конкретный блок,
         // панель НЕ закрывается (обычно переключают несколько блоков подряд).
         panel.querySelectorAll('.iigqs-chip[data-extblock-id]').forEach(btn => {
@@ -604,16 +771,23 @@
         fab.title = 'IIG: быстрый стиль / подключение';
         fab.innerHTML = `<i class="fa-fw ${FAB_ICON_CLASS}"></i>`;
 
-        const pos = loadPos() || { right: 16, bottom: 90 };
+        // top-anchored; clamp saved pos to current viewport so it can't land off-screen
+        const vv = window.visualViewport;
+        const vw = vv ? vv.width : window.innerWidth;
+        const vh = vv ? vv.height : window.innerHeight;
+        const saved = loadPos();
+        const pos = (saved && saved.right >= 0 && saved.top >= 0 && saved.right < vw - 10 && saved.top < vh - 10)
+            ? saved
+            : { right: 15, top: 120 };
         fab.style.right = `${pos.right}px`;
-        fab.style.bottom = `${pos.bottom}px`;
+        fab.style.top = `${pos.top}px`;
 
         document.body.appendChild(fab);
 
         let dragging = false;
         let moved = false;
         let startClientX = 0, startClientY = 0;
-        let startRight = 0, startBottom = 0;
+        let startRight = 0, startTop = 0;
 
         fab.addEventListener('pointerdown', (e) => {
             dragging = true;
@@ -622,7 +796,7 @@
             startClientY = e.clientY;
             const cs = getComputedStyle(fab);
             startRight = parseFloat(cs.right) || 0;
-            startBottom = parseFloat(cs.bottom) || 0;
+            startTop = parseFloat(cs.top) || 0;
             fab.setPointerCapture(e.pointerId);
         });
 
@@ -634,13 +808,15 @@
             if (!moved) return;
 
             let newRight = startRight - dx;
-            let newBottom = startBottom - dy;
+            let newTop = startTop + dy;
             const size = fab.offsetWidth || 44;
-            newRight = Math.max(4, Math.min(newRight, window.innerWidth - size - 4));
-            newBottom = Math.max(4, Math.min(newBottom, window.innerHeight - size - 4));
+            const cvw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+            const cvh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+            newRight = Math.max(4, Math.min(newRight, cvw - size - 4));
+            newTop = Math.max(4, Math.min(newTop, cvh - size - 4));
 
             fab.style.right = `${newRight}px`;
-            fab.style.bottom = `${newBottom}px`;
+            fab.style.top = `${newTop}px`;
             if (panelOpen) closePanel();
         });
 
@@ -650,8 +826,8 @@
             try { fab.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
             if (moved) {
                 const right = parseFloat(getComputedStyle(fab).right) || 0;
-                const bottom = parseFloat(getComputedStyle(fab).bottom) || 0;
-                savePos(right, bottom);
+                const top = parseFloat(getComputedStyle(fab).top) || 0;
+                savePos(right, top);
             } else {
                 openPanel();
             }
