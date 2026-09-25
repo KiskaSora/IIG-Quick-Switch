@@ -1,30 +1,34 @@
 /**
  * IIG Quick Switch
- * Маленький плавающий виджет для быстрого переключения:
+ * Плавающая кнопка-виджет для быстрого переключения (без открытия большой
+ * панели настроек):
  *  - активного стиля (settings.styles / activeStyleId)
- *  - активного профиля подключения (settings.connectionProfiles / activeConnectionProfileId —
- *    те самые «Профили подключения» под «Настройки API») в расширении SillyImages
- *    (inline_image_gen), без открытия его большой панели настроек.
+ *  - активного профиля подключения (settings.connectionProfiles /
+ *    activeConnectionProfileId — «Профиль» под «Настройки API»: тип API,
+ *    эндпоинт, ключ, модель и все параметры, специфичные для конкретного
+ *    провайдера)
+ *  - отдельных блоков ExtBlocks (если это расширение тоже установлено рядом)
  *
- * Ничего не патчит и не требует SillyImages как зависимость на уровне manifest —
- * просто читает/пишет тот же extensionSettings['inline_image_gen'], что и SillyImages.
+ * Ничего не патчит и не требует основное расширение как зависимость на
+ * уровне manifest — просто читает/пишет тот же extensionSettings['inline_image_gen'].
  *
- * Синхронизировано со структурой оригинального SillyImages
- * (https://github.com/0xl0cal/sillyimages/): ключ настроек, список полей профиля
- * подключения (CONNECTION_FIELDS) и разметка (.iig-style-item / #iig_profile_select
- * и т.п.) должны соответствовать src/settings.js и src/ui.js оттуда. Если апстрим
- * поменяет эти имена/поля — их нужно будет обновить и здесь.
+ * CONNECTION_FIELDS — объединение полей подключения из двух исходных форков
+ * этого виджета (xai-, a1111- и naistera-polling-провайдеры из одного,
+ * electronhub-/novelai-/override*-провайдеры из другого), так что виджет
+ * работает независимо от того, какой именно набор провайдеров сейчас
+ * настроен. Поля, которых нет в текущих настройках, просто игнорируются
+ * (см. applyConnectionProfile) — это безопасный суперсет, а не замена.
  */
 (function initIigQuickSwitch() {
     'use strict';
 
-    const MODULE_NAME = 'inline_image_gen'; // ключ настроек SillyImages — НЕ трогать
-    const QS = 'iig_quickswitch';           // наш собственный неймспейс (позиция кнопки и т.п.)
+    const MODULE_NAME = 'inline_image_gen'; // ключ настроек IIG (и SillyImages) — НЕ трогать
+    const QS = 'iig_quickswitch';      // наш собственный неймспейс (позиция кнопки, закреплённые чипы)
 
     // ── Настраиваемое: какую FA-иконку показывать на плавающей кнопке ──
-    // Ненавязчивая по умолчанию: fa-palette (ассоциируется со «стилями»).
-    // Другие спокойные варианты на выбор: fa-wand-magic-sparkles, fa-swatchbook, fa-brush, fa-sliders.
-    const FAB_ICON_CLASS = 'fa-solid fa-palette';
+    // Лапка 🐾. Другие спокойные варианты:
+    // fa-solid fa-wand-magic-sparkles, fa-solid fa-cat, fa-solid fa-sliders.
+    const FAB_ICON_CLASS = 'fa-solid fa-paw';
 
     function ctx() { return SillyTavern.getContext(); }
 
@@ -57,7 +61,8 @@
         console.log('[IIG-QS]', msg);
     }
 
-    // ── Стили ──
+    // ── Стили (settings.styles / activeStyleId — структура в IIG не изменилась
+    // по сравнению со SillyImages: { id, name, value, ... }) ──
     function getStyles(settings) {
         return Array.isArray(settings.styles) ? settings.styles : [];
     }
@@ -68,103 +73,209 @@
         syncMainStylePanel(settings.activeStyleId);
     }
 
-    // Если родная панель настроек SillyImages сейчас открыта в DOM, подсвечиваем
-    // в ней активный стиль напрямую (публичного API у SillyImages для этого нет,
-    // так что просто подкручиваем классы/иконку в её разметке — id/классы стабильны:
-    // #iig_style_presets > .iig-style-item[.active] > .iig-style-activation > i.fa-circle-check/fa-circle,
-    // и отдельная кнопка «Без стиля» — .iig-style-none[.active]).
+    // Если родная панель настроек IIG сейчас открыта в DOM — подсвечиваем
+    // в ней активный стиль напрямую. У IIG другая разметка списка стилей,
+    // чем была у SillyImages (нет chip-ов, вместо них список .iig-style-item
+    // с data-ps-id и индикатором fa-circle / fa-circle-check внутри
+    // .iig-style-item-indicator), поэтому синк переписан под неё.
     function syncMainStylePanel(activeId) {
         try {
             const container = document.getElementById('iig_style_presets');
             if (!container) return;
-            container.querySelectorAll('.iig-style-item').forEach((item) => {
-                const id = item.dataset.styleId || '';
+            container.querySelectorAll('.iig-style-item[data-ps-id]').forEach((itemEl) => {
+                const id = itemEl.dataset.psId || '';
                 const isActive = id === (activeId || '');
-                item.classList.toggle('active', isActive);
-                const icon = item.querySelector('.iig-style-activation i');
+                itemEl.classList.toggle('iig-style-item-active', isActive);
+                const icon = itemEl.querySelector('.iig-style-item-indicator i');
                 if (icon) {
                     icon.classList.toggle('fa-circle-check', isActive);
                     icon.classList.toggle('fa-circle', !isActive);
                 }
             });
-            const noStyleBtn = container.querySelector('.iig-style-none');
-            if (noStyleBtn) noStyleBtn.classList.toggle('active', !activeId);
         } catch (e) { /* родная панель могла измениться — просто не синкаем */ }
     }
 
-    // ── Профили подключения (settings.connectionProfiles — то самое «Профили подключения»
-    // под «Настройки API» в SillyImages: тип API, эндпоинт, ключ, модель и все
-    // provider-specific параметры генерации). Список полей должен совпадать с
-    // CONNECTION_FIELDS в src/settings.js оригинального SillyImages. ──
-    const PRESET_KEYS = [
-        'apiType', 'endpoint', 'rawEndpoint', 'apiKey', 'model', 'size', 'quality',
-        'aspectRatio', 'imageSize',
+    // ── Профиль подключения (settings.connectionProfiles — «Профиль» под
+    // «Настройки API» в основном расширении: тип API, эндпоинт, ключ, модель
+    // и все параметры, специфичные для конкретного провайдера).
+    // Список — объединение полей из двух исходных форков этого виджета:
+    // xai*/a1111*/naisteraCharacterDescriptionsMode/naisteraPolling* — из одного,
+    // electronhub*/novelai*/override* — из другого. Лишние поля молчаливо
+    // игнорируются, если их нет в текущих настройках (см. applyConnectionProfile —
+    // пишет только те ключи, что реально есть в профиле), так что держать их здесь
+    // безопасно даже если у тебя сейчас нет части этих провайдеров. ──
+    const CONNECTION_FIELDS = [
+        'apiType', 'endpoint', 'rawEndpoint', 'apiKey', 'model',
+        'size', 'quality',
+        'aspectRatio', 'overrideAspectRatio', 'imageSize', 'overrideImageSize',
         'xaiAspectRatio', 'xaiResolution', 'xaiQuality',
-        'sendCharAvatar', 'sendUserAvatar', 'useActiveUserPersonaAvatar', 'userAvatarFile',
+        'sendCharAvatar', 'sendUserAvatar', 'optionalAvatarSending', 'useActiveUserPersonaAvatar', 'userAvatarFile',
         'naisteraAspectRatio', 'naisteraModel', 'naisteraCharacterDescriptionsMode',
-        'naisteraSendCharAvatar', 'naisteraSendUserAvatar', 'naisteraVideoTest', 'naisteraVideoEveryN',
+        'naisteraSendCharAvatar', 'naisteraSendUserAvatar',
+        'naisteraVideoTest', 'naisteraVideoEveryN',
         'naisteraPolling', 'naisteraPollIntervalMs', 'naisteraPollTimeoutMs',
+        'electronhubStyle', 'electronhubNegativePrompt', 'electronhubGuidanceScale', 'electronhubSteps', 'electronhubEnableReferences',
+        'novelaiModel', 'novelaiCustomModel', 'novelaiSampler', 'novelaiScheduler', 'novelaiSteps', 'novelaiScale', 'novelaiSize',
+        'novelaiNegativePrompt', 'novelaiAnlasGuard', 'novelaiDecrisper', 'novelaiVarietyBoost', 'novelaiSm', 'novelaiSmDyn',
+        'novelaiEnableReferences', 'novelaiReferenceType', 'novelaiReferenceStrength', 'novelaiReferenceFidelity',
         'a1111Width', 'a1111Height', 'a1111Steps', 'a1111CfgScale', 'a1111Sampler', 'a1111Scheduler',
         'a1111Vae', 'a1111HrUpscaler', 'a1111HrScale', 'a1111DenoisingStrength', 'a1111HrSecondPassSteps',
         'a1111ClipSkip', 'a1111RestoreFaces', 'a1111EnableHr', 'a1111AdetailerFace', 'a1111Resolution',
         'a1111PromptPrefix', 'a1111NegativePrompt', 'a1111Seed',
     ];
 
-    function getConnPresets(settings) {
+    // ── Размер / соотношение сторон — у каждого apiType свой параметр (или два)
+    // в родной панели (src/ui/apiSection.js), поэтому набор контролов зависит
+    // от settings.apiType. У aigate отдельного контрола размера в родной панели
+    // нет — для него секция скрывается. Список опций и подписи продублированы
+    // из apiSection.js / i18n/ru-ru.json, чтобы 1:1 совпадать с родной панелью. ──
+    const AUTO_OPTION = { value: 'auto', label: 'Авто / из промпта' };
+
+    function getSizeControls(settings) {
+        const apiType = settings.apiType;
+
+        if (apiType === 'openai' || apiType === 'electronhub') {
+            return [{
+                field: 'size',
+                options: [
+                    AUTO_OPTION,
+                    { value: '1024x1024', label: '1024x1024 (Квадрат)' },
+                    { value: '1792x1024', label: '1792x1024 (Альбомная)' },
+                    { value: '1024x1792', label: '1024x1792 (Портретная)' },
+                    { value: '512x512', label: '512x512 (Маленький)' },
+                ],
+            }];
+        }
+
+        if (apiType === 'naistera') {
+            return [{
+                field: 'naisteraAspectRatio',
+                options: [
+                    AUTO_OPTION,
+                    { value: '1:1', label: '1:1' },
+                    { value: '16:9', label: '16:9' },
+                    { value: '9:16', label: '9:16' },
+                    { value: '3:2', label: '3:2' },
+                    { value: '2:3', label: '2:3' },
+                ],
+            }];
+        }
+
+        if (apiType === 'novelai') {
+            return [{
+                field: 'novelaiSize',
+                // Совпадает 1:1 с NOVELAI_SIZES из settings.js основного расширения.
+                options: [
+                    { value: 'Portrait', label: 'Portrait (832×1216)' },
+                    { value: 'Landscape', label: 'Landscape (1216×832)' },
+                    { value: 'Square', label: 'Square (1024×1024)' },
+                ],
+            }];
+        }
+
+        if (apiType === 'gemini' || apiType === 'openrouter' || apiType === 'void') {
+            return [
+                {
+                    field: 'aspectRatio',
+                    label: 'Соотношение сторон',
+                    options: [
+                        AUTO_OPTION,
+                        { value: '1:1', label: '1:1 (Квадрат)' },
+                        { value: '2:3', label: '2:3 (Портрет)' },
+                        { value: '3:2', label: '3:2 (Альбом)' },
+                        { value: '3:4', label: '3:4 (Портрет)' },
+                        { value: '4:3', label: '4:3 (Альбом)' },
+                        { value: '4:5', label: '4:5 (Портрет)' },
+                        { value: '5:4', label: '5:4 (Альбом)' },
+                        { value: '9:16', label: '9:16 (Вертикальный)' },
+                        { value: '16:9', label: '16:9 (Широкий)' },
+                        { value: '21:9', label: '21:9 (Ультраширокий)' },
+                    ],
+                },
+                {
+                    field: 'imageSize',
+                    label: 'Разрешение',
+                    options: [
+                        AUTO_OPTION,
+                        { value: '1K', label: '1K (по умолчанию)' },
+                        { value: '2K', label: '2K' },
+                        { value: '4K', label: '4K' },
+                    ],
+                },
+            ];
+        }
+
+        // aigate и любые незнакомые apiType — своего контрола размера нет.
+        return [];
+    }
+
+    function applySizeField(settings, field, value) {
+        settings[field] = value;
+        saveSettings();
+        syncMainPresetPanel(settings);
+    }
+
+    function getConnectionProfiles(settings) {
         return Array.isArray(settings.connectionProfiles) ? settings.connectionProfiles : [];
     }
 
-    function applyConnectionPreset(settings, preset) {
-        if (!preset) return false;
-        for (const key of PRESET_KEYS) {
-            if (preset[key] !== undefined) settings[key] = clone(preset[key]);
+    function applyConnectionProfile(settings, profile) {
+        if (!profile) return false;
+        for (const key of CONNECTION_FIELDS) {
+            if (profile[key] !== undefined) settings[key] = clone(profile[key]);
         }
-        settings.activeConnectionProfileId = preset.id;
+        settings.activeConnectionProfileId = profile.id;
         saveSettings();
         syncMainPresetPanel(settings);
         return true;
     }
 
-    // Если родная панель настроек SillyImages открыта — подтягиваем туда же поля
-    // подключения и текущий выбранный профиль (те же id полей, что использует сама SillyImages).
+    // Если родная панель настроек IIG открыта — подтягиваем туда же поля
+    // подключения и текущий выбранный профиль (те же id полей, что использует само
+    // IIG в src/ui/apiSection.js). В отличие от SillyImages, здесь iig_model —
+    // текстовое поле, а не <select> с одной опцией, так что просто пишем .value.
     function syncMainPresetPanel(settings) {
         try {
             const setVal = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined) el.value = val; };
+            const setChecked = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined) el.checked = !!val; };
+
             setVal('iig_api_type', settings.apiType);
             setVal('iig_endpoint', settings.endpoint);
+            setChecked('iig_raw_endpoint', settings.rawEndpoint);
             setVal('iig_api_key', settings.apiKey);
+            setVal('iig_model', settings.model);
+            // На случай, если модель в текущей панели — выпадающий список
+            // подгруженных моделей (#iig_model_select), а не текстовый input
+            // (так было в SillyImages/IIG): выставляем value, если там уже
+            // есть такая опция. Если элемента нет — просто ничего не делает.
+            const modelSel = document.getElementById('iig_model_select');
+            if (modelSel && settings.model !== undefined) {
+                const hasOption = Array.from(modelSel.options || []).some((o) => o.value === settings.model);
+                if (hasOption) modelSel.value = settings.model;
+            }
             setVal('iig_naistera_model', settings.naisteraModel);
             setVal('iig_naistera_aspect_ratio', settings.naisteraAspectRatio);
             setVal('iig_aspect_ratio', settings.aspectRatio);
             setVal('iig_image_size', settings.imageSize);
             setVal('iig_size', settings.size);
             setVal('iig_quality', settings.quality);
-            // Режим "raw endpoint": модель — обычный текстовый input (#iig_model).
-            // Иначе — выпадающий список подгруженных моделей (#iig_model_select);
-            // его список нам не переписать (нет доступа к fetch'нутым моделям),
-            // просто выставляем value, если там уже есть такая опция.
-            setVal('iig_model', settings.model);
-            const modelSel = document.getElementById('iig_model_select');
-            if (modelSel && settings.model !== undefined) {
-                const hasOption = Array.from(modelSel.options || []).some((o) => o.value === settings.model);
-                if (hasOption) modelSel.value = settings.model;
-            }
+            setVal('iig_novelai_size', settings.novelaiSize);
 
-            const presetSel = document.getElementById('iig_profile_select');
-            if (presetSel && presetSel.value !== (settings.activeConnectionProfileId || '')) {
-                presetSel.value = settings.activeConnectionProfileId || '';
+            const profileSel = document.getElementById('iig_profile_select');
+            if (profileSel && profileSel.value !== (settings.activeConnectionProfileId || '')) {
+                profileSel.value = settings.activeConnectionProfileId || '';
             }
         } catch (e) { /* родная панель могла измениться — просто не синкаем */ }
     }
 
-    // ── Пресеты блоков (ExtBlocks — отдельные блоки внутри ТЕКУЩЕГО активного Set'а,
-    // то самое «Preset blocks:» / #ExtBlocks-blocks-global-list в настройках ExtBlocks) ──
+    // ── Пресеты блоков (ExtBlocks — отдельное расширение, никак не связанное с IIG;
+    // логика полностью повторяет оригинал — отдельные блоки внутри ТЕКУЩЕГО активного Set'а,
+    // то самое «Preset blocks:» / #ExtBlocks-blocks-global-list в его настройках) ──
     // Публичного API у ExtBlocks нет, поэтому вкл/выкл блока делаем "по-честному": находим
     // его нативный чекбокс .disable_ExtBlocks в уже отрисованной строке блока (по id блока)
     // и диспатчим событие change — так отрабатывает вся его внутренняя логика (BlockService.saveBlock,
     // removeBlockInject и т.д.), а не просто переписывается settings.
     const EXTBLOCKS_MODULE = 'ExtBlocks';
-    const EXTBLOCKS_GLOBAL_LIST_ID = 'ExtBlocks-blocks-global-list';
 
     function getExtBlocksSettings() {
         const c = ctx();
@@ -184,11 +295,12 @@
         return typeIcon ? `${typeIcon} · ${block.name || 'Блок'}` : (block.name || 'Блок');
     }
 
-    // ── Connection Profile (ExtBlocks) — выпадающий список «Connection Profile:»
-    // под API Preset в настройках ExtBlocks (не путать с «Пресетом подключения» IIG
-    // выше в этой же панели — разные сущности). Список берётся из встроенного
-    // в SillyTavern Connection Manager и привязан к текущему активному API Preset
-    // ExtBlocks (у каждого из Big/Medium/Small свой connection_profile).
+    // ── Connection Profile (ExtBlocks) — тот самый выпадающий список «Connection Profile:»
+    // под API Preset в настройках ExtBlocks (НЕ путать с «Профилем подключения» IIG
+    // выше в этой же панели — это разные сущности!). Список берётся из встроенного
+    // в SillyTavern Connection Manager (extensionSettings.connectionManager.profiles) и
+    // привязан к ТЕКУЩЕМУ активному API Preset ExtBlocks — у каждого из Big/Medium/Small
+    // свой собственный connection_profile.
     const EXTBLOCKS_API_PRESET_NAMES = ['big', 'medium', 'small'];
 
     function getActiveApiPresetName(ebSettings) {
@@ -220,7 +332,7 @@
         return true;
     }
 
-    // Наше собственное хранилище (какие именно блоки закреплены для быстрого доступа).
+    // Наше собственное хранилище (какие именно стили/блоки закреплены для быстрого доступа).
     // Живёт в extensionSettings[QS], сохраняется вместе с обычными настройками ST.
     function getQsStore() {
         const c = ctx();
@@ -256,20 +368,6 @@
         saveSettings();
     }
 
-    function getPinnedExtBlocksProfileNames() {
-        const store = getQsStore();
-        return store ? store.pinnedExtBlocksProfiles : [];
-    }
-
-    function togglePinExtBlocksProfile(name) {
-        const store = getQsStore();
-        if (!store || !name) return;
-        const idx = store.pinnedExtBlocksProfiles.indexOf(name);
-        if (idx >= 0) store.pinnedExtBlocksProfiles.splice(idx, 1);
-        else store.pinnedExtBlocksProfiles.push(name);
-        saveSettings();
-    }
-
     function getPinnedBlockIds() {
         const store = getQsStore();
         return store ? store.pinnedExtBlocks : [];
@@ -281,6 +379,20 @@
         const idx = store.pinnedExtBlocks.indexOf(blockId);
         if (idx >= 0) store.pinnedExtBlocks.splice(idx, 1);
         else store.pinnedExtBlocks.push(blockId);
+        saveSettings();
+    }
+
+    function getPinnedExtBlocksProfileNames() {
+        const store = getQsStore();
+        return store ? store.pinnedExtBlocksProfiles : [];
+    }
+
+    function togglePinExtBlocksProfile(name) {
+        const store = getQsStore();
+        if (!store || !name) return;
+        const idx = store.pinnedExtBlocksProfiles.indexOf(name);
+        if (idx >= 0) store.pinnedExtBlocksProfiles.splice(idx, 1);
+        else store.pinnedExtBlocksProfiles.push(name);
         saveSettings();
     }
 
@@ -347,43 +459,67 @@
     function renderPanelBody() {
         const settings = getIigSettings();
         if (!settings) {
-            return `<div class="iigqs-empty">SillyImages ещё не инициализировал настройки.<br>Открой один раз его панель настроек и попробуй снова.</div>`;
+            return `<div class="iigqs-empty">IIG ещё не инициализировал настройки.<br>Открой один раз его панель настроек и попробуй снова.</div>`;
         }
 
-        const presets = getConnPresets(settings);
+        const profiles = getConnectionProfiles(settings);
 
         let connHtml = '';
-        if (presets.length) {
+        if (profiles.length) {
             connHtml = `
                 <div class="iigqs-section-title"><i class="fa-fw fa-solid fa-plug"></i> Профиль подключения</div>
-                <select class="iigqs-select" id="iigqs-preset-select">
+                <select class="iigqs-select" id="iigqs-profile-select">
                     <option value="">— выбрать профиль —</option>
-                    ${presets.map(p => `<option value="${esc(p.id)}" ${settings.activeConnectionProfileId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+                    ${profiles.map(p => `<option value="${esc(p.id)}" ${settings.activeConnectionProfileId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
                 </select>
             `;
         } else {
             connHtml = `
                 <div class="iigqs-section-title"><i class="fa-fw fa-solid fa-plug"></i> Профиль подключения</div>
-                <div class="iigqs-hint">Профилей подключения нет — создай их в настройках SillyImages («Настройки API» → «Профиль»), чтобы переключать отсюда в один тап.</div>
+                <div class="iigqs-hint">Профилей подключения нет — создай их в настройках IIG («Настройки API» → «Профиль»), чтобы переключать отсюда в один тап.</div>
             `;
         }
 
         return `
             ${renderStylesSection(settings)}
             ${connHtml}
-            <div class="iigqs-divider"></div>
+            ${renderSizeSection(settings)}
             ${renderExtBlocksProfileSection()}
             ${renderExtBlocksSection()}
         `;
     }
 
+    // ── Секция «Размер»: один или два выпадающих списка (зависит от apiType,
+    // см. getSizeControls) — сразу все варианты текущего провайдера, выбор
+    // в списке применяет значение сразу же, без открытия большой панели. ──
+    function renderSizeSection(settings) {
+        const header = `<div class="iigqs-section-title"><i class="fa-fw fa-solid fa-expand"></i> Размер</div>`;
+        const controls = getSizeControls(settings);
+
+        if (!controls.length) {
+            return `${header}<div class="iigqs-hint">У текущего типа API (${esc(settings.apiType || '?')}) нет отдельного параметра размера в панели IIG.</div>`;
+        }
+
+        return `
+            ${header}
+            <div class="iigqs-size-controls">
+                ${controls.map(c => `
+                    ${c.label ? `<div class="iigqs-select-label">${esc(c.label)}</div>` : ''}
+                    <select class="iigqs-select" data-size-field="${esc(c.field)}">
+                        ${c.options.map(o => `<option value="${esc(o.value)}" ${settings[c.field] === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+                    </select>
+                `).join('')}
+            </div>
+        `;
+    }
+
     // ── Секция «Стиль»: чипы с только выбранными стилями (+ всегда «Без стиля»)
-    // + переключатель в режим «отметить нужные», как и у пресетов блоков. ──
+    // + переключатель в режим «отметить нужные». ──
     function renderStylesSection(settings) {
         const styles = getStyles(settings);
         const header = (extraTitle) => `
             <div class="iigqs-section-title iigqs-section-title-row">
-                <span class="iigqs-section-title-label"><i class="fa-fw fa-solid fa-palette"></i> Стиль${extraTitle || ''}</span>
+                <span class="iigqs-section-title-label"><i class="fa-fw fa-solid fa-paw"></i> Стиль${extraTitle || ''}</span>
                 ${styles.length ? `
                     <button type="button" class="iigqs-manage-toggle" id="iigqs-styles-manage-toggle"
                         title="${manageStylesOpen ? 'Готово' : 'Выбрать, какие стили показывать'}">
@@ -394,7 +530,7 @@
         `;
 
         if (!styles.length) {
-            return `${header()}<div class="iigqs-hint">Стилей пока нет — добавь их в настройках SillyImages («Стили»), и они появятся здесь.</div>`;
+            return `${header()}<div class="iigqs-hint">Стилей пока нет — добавь их в настройках IIG («Стили»), и они появятся здесь.</div>`;
         }
 
         if (manageStylesOpen) {
@@ -433,7 +569,8 @@
     }
 
     // ── Секция «Connection Profile (ExtBlocks)»: чипы с только выбранными профилями
-    // подключения из Connection Manager + переключатель в режим «отметить нужные». ──
+    // подключения из Connection Manager + переключатель в режим «отметить нужные»
+    // (профилей в Connection Manager обычно много, показывать сразу все — захламляет). ──
     function renderExtBlocksProfileSection() {
         const ebSettings = getExtBlocksSettings();
         const profiles = getConnectionManagerProfiles();
@@ -584,7 +721,7 @@
     function attachPanelListeners() {
         if (!panel) return;
 
-        // Чипы стиля (стили IIG/SillyImages) — data-style-id
+        // Чипы стиля (стили IIG) — data-style-id
         panel.querySelectorAll('.iigqs-chip[data-style-id]').forEach(btn => {
             btn.addEventListener('click', () => {
                 const settings = getIigSettings();
@@ -635,23 +772,38 @@
             });
         }
 
-        const sel = panel.querySelector('#iigqs-preset-select');
+        const sel = panel.querySelector('#iigqs-profile-select');
         if (sel) {
             sel.addEventListener('change', () => {
                 const settings = getIigSettings();
                 if (!settings) return;
                 const id = sel.value;
                 if (!id) return;
-                const preset = getConnPresets(settings).find(p => p.id === id);
-                if (!preset) { toast('Пресет не найден', 'error'); return; }
-                applyConnectionPreset(settings, preset);
+                const profile = getConnectionProfiles(settings).find(p => p.id === id);
+                if (!profile) { toast('Профиль не найден', 'error'); return; }
+                applyConnectionProfile(settings, profile);
                 closePanel();
-                toast(`Подключение: ${preset.name}`, 'success');
+                toast(`Подключение: ${profile.name}`, 'success');
             });
         }
 
+        // Списки «Размер» — data-size-field. Выбор применяет значение сразу же;
+        // панель не закрывается, т.к. у некоторых провайдеров тут два списка подряд
+        // (соотношение сторон + разрешение) и удобно выставить оба один за другим.
+        panel.querySelectorAll('select[data-size-field]').forEach(sel => {
+            sel.addEventListener('change', () => {
+                const settings = getIigSettings();
+                if (!settings) return;
+                const field = sel.dataset.sizeField;
+                applySizeField(settings, field, sel.value);
+                const opt = sel.options[sel.selectedIndex];
+                toast(`Размер: ${opt ? opt.text : sel.value}`, 'success');
+            });
+        });
+
         // Чипы Connection Profile (ExtBlocks) — data-conn-profile-name. Тап = переключить
-        // профиль текущего активного API Preset через нативный select ExtBlocks.
+        // профиль текущего активного API Preset через нативный select ExtBlocks
+        // (см. applyExtBlocksConnectionProfile).
         panel.querySelectorAll('.iigqs-chip[data-conn-profile-name]').forEach(btn => {
             btn.addEventListener('click', () => {
                 const name = btn.dataset.connProfileName;
@@ -792,7 +944,7 @@
         fab.title = 'IIG: быстрый стиль / подключение';
         fab.innerHTML = `<i class="fa-fw ${FAB_ICON_CLASS}"></i>`;
 
-        // top-anchored; clamp saved pos to current viewport so it can't land off-screen
+        // top-anchored; clamp saved pos to current viewport (like Asta)
         const vv = window.visualViewport;
         const vw = vv ? vv.width : window.innerWidth;
         const vh = vv ? vv.height : window.innerHeight;
