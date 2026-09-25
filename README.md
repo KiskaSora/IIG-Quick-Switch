@@ -3,6 +3,9 @@
 Маленькое отдельное расширение-виджет. Не патчит и не заменяет основные расширения —
 просто читает и пишет те же настройки, что и они.
 
+   ![Панель IIG Quick Switch](<img width="379" height="643" alt="image" src="https://github.com/user-attachments/assets/c19843b7-cdd7-4ddf-8b36-26b660e6814b" />
+)
+
 ## Совместимость
 
 Работает поверх любого из этих расширений (читает и пишет их `extensionSettings['inline_image_gen']`):
