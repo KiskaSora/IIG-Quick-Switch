@@ -3,6 +3,18 @@
 Маленькое отдельное расширение-виджет. Не патчит и не заменяет основные расширения —
 просто читает и пишет те же настройки, что и они.
 
+## Совместимость
+
+Работает поверх любого из этих расширений (читает и пишет их `extensionSettings['inline_image_gen']`):
+
+- [sillyimages](https://github.com/0xl0cal/sillyimages.git) — 0xl0cal
+- [sillywardrobe3-0](https://github.com/niemandswasser/sillywardrobe3-0) — niemandswasser
+- [sillyimages](https://github.com/delidgi/sillyimages) — delidgi
+
+А также с внешними блоками:
+
+- [ext-blocks-custom](https://gitgud.io/sleepydraqon/ext-blocks-custom) — sleepydraqon
+
 ## Что делает
 
 Плавающая кнопка (лапка 🐾) поверх интерфейса. Тап — открывает маленькую панель:
