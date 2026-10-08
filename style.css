@@ -12,7 +12,10 @@
 .iigqs-fab {
     /* !important + top-anchor: matches #asta-fab, avoids mobile bottom-bar hiding */
     position: fixed !important;
-    z-index: 99999 !important;
+    /* Слои как у ST-LiteBranch (31–33): лапка лежит выше чата, но ниже
+       шторок, меню и попапов SillyTavern — они её перекрывают и спокойно
+       закрываются, двигать лапку не нужно. */
+    z-index: 32 !important;
     top: 120px;
     right: 15px;
     width: 34px;
@@ -47,7 +50,7 @@
 
 .iigqs-panel {
     position: fixed !important;
-    z-index: 100000 !important;
+    z-index: 33 !important; /* панель на слой выше лапки */
     display: none;
     flex-direction: column;
     gap: 8px;
