@@ -351,6 +351,12 @@
         if (!Array.isArray(store.pinnedExtBlocksProfiles)) {
             store.pinnedExtBlocksProfiles = [];
         }
+        if (!Array.isArray(store.pinnedContextItems)) {
+            store.pinnedContextItems = [];
+        }
+        if (typeof store.ctxTab !== 'string') {
+            store.ctxTab = '';
+        }
         return store;
     }
 
@@ -396,6 +402,62 @@
         saveSettings();
     }
 
+    // ── Тоглы внутри блока («Context Items» в Block Settings: CLUE: user, OLDBlock,
+    // 18+ и т.д.). Закрепляем их по составному ключу «id блока :: id элемента»,
+    // потому что у разных блоков могут быть элементы с одинаковыми именами. ──
+    const CTX_SEP = '::';
+
+    function ctxKey(block, item) { return `${block.id}${CTX_SEP}${item.id}`; }
+
+    function getPinnedCtxKeys() {
+        const store = getQsStore();
+        return store ? store.pinnedContextItems : [];
+    }
+
+    function togglePinCtx(key) {
+        const store = getQsStore();
+        if (!store || !key) return;
+        const idx = store.pinnedContextItems.indexOf(key);
+        if (idx >= 0) store.pinnedContextItems.splice(idx, 1);
+        else store.pinnedContextItems.push(key);
+        saveSettings();
+    }
+
+    // Блоки активного набора, у которых есть Context Items (и у самих блоков, и у элементов есть id).
+    function getBlocksWithContext(ebSettings) {
+        return getActiveSetBlocks(ebSettings).filter(b => b && b.id && Array.isArray(b.context)
+            && b.context.some(it => it && it.id));
+    }
+
+    function ctxItemLabel(item) {
+        return item.name || item.type || 'Элемент';
+    }
+
+    // Вкл/выкл тогла внутри блока. Сначала пробуем «по-честному» — через нативный
+    // переключатель в строке элемента (если вкладка Block Settings сейчас отрисована),
+    // а если его нет или он ничего не поменял в данных — правим item.disabled сами и
+    // сохраняем. Так работает и когда окно настроек блока закрыто.
+    function toggleContextItem(block, item) {
+        const before = !!item.disabled;
+        let usedNative = false;
+        try {
+            const row = document.getElementById(item.id)
+                || document.querySelector(`[data-id="${CSS.escape(item.id)}"]`);
+            const cb = row ? row.querySelector('input[type="checkbox"]') : null;
+            if (cb) {
+                cb.checked = !cb.checked;
+                cb.dispatchEvent(new Event('change', { bubbles: true }));
+                usedNative = true;
+            }
+        } catch (e) { /* упадём в ручной режим ниже */ }
+
+        if (!usedNative || !!item.disabled === before) {
+            item.disabled = !before;
+            saveSettings();
+        }
+        return true;
+    }
+
     // Вкл/выкл конкретный блок через его же нативный чекбокс + событие change
     // (тот самый переключатель-«глазок»/toggle в строке блока в настройках ExtBlocks).
     function toggleExtBlock(block) {
@@ -434,6 +496,9 @@
     let manageExtBlocksOpen = false; // локальный вид панели: список чипов ↔ список чекбоксов выбора
     let manageStylesOpen = false;    // то же самое, но для секции «Стиль»
     let manageExtProfilesOpen = false; // то же самое, но для секции «Connection Profile (ExtBlocks)»
+    let manageCtxOpen = false;         // то же самое, но для секции «Тоглы блоков»
+    let ctxActiveTab = '';             // id блока, чья вкладка открыта в секции «Тоглы блоков»
+    const CTX_DOT_COLORS = ['#5DCAA5', '#F0997B', '#85B7EB', '#ED93B1', '#EF9F27', '#AFA9EC'];
 
     function closePanel() {
         if (panel) panel.remove();
@@ -442,6 +507,7 @@
         manageExtBlocksOpen = false; // при следующем открытии всегда стартуем с чипов
         manageStylesOpen = false;
         manageExtProfilesOpen = false;
+        manageCtxOpen = false;
         document.removeEventListener('pointerdown', onDocPointerDown, true);
         document.removeEventListener('keydown', onDocKeyDown, true);
     }
@@ -486,6 +552,7 @@
             ${renderSizeSection(settings)}
             ${renderExtBlocksProfileSection()}
             ${renderExtBlocksSection()}
+            ${renderContextItemsSection()}
         `;
     }
 
@@ -687,6 +754,90 @@
         }
 
         return `${header()}${body}`;
+    }
+
+    // ── Секция «Тоглы блоков» (самая нижняя): чипы с закреплёнными тоглами из «Context Items»
+    // любых блоков текущего набора ExtBlocks. Тап по чипу = вкл/выкл этот тогл, панель не
+    // закрывается. В режиме ⚙ — список всех блоков с их тоглами и чекбоксами «закрепить». ──
+    function renderContextItemsSection() {
+        const ebSettings = getExtBlocksSettings();
+        const blocks = getBlocksWithContext(ebSettings);
+        const header = (extraTitle) => `
+            <div class="iigqs-section-title iigqs-section-title-row">
+                <span class="iigqs-section-title-label"><i class="fa-fw fa-solid fa-toggle-on"></i> Тоглы блоков${extraTitle || ''}</span>
+                ${blocks.length ? `
+                    <button type="button" class="iigqs-manage-toggle" id="iigqs-ctx-manage-toggle"
+                        title="${manageCtxOpen ? 'Готово' : 'Выбрать, какие тоглы показывать'}">
+                        <i class="fa-fw fa-solid ${manageCtxOpen ? 'fa-check' : 'fa-gear'}"></i>
+                    </button>
+                ` : ''}
+            </div>
+        `;
+
+        if (!ebSettings) {
+            return `${header()}<div class="iigqs-hint">Расширение ExtBlocks не найдено или ещё не загрузилось.</div>`;
+        }
+        if (!blocks.length) {
+            return `${header()}<div class="iigqs-hint">В блоках текущего набора ExtBlocks нет «Context Items».</div>`;
+        }
+
+        if (manageCtxOpen) {
+            const pinned = getPinnedCtxKeys();
+            const quickActions = `
+                <div class="iigqs-manage-quickactions">
+                    <button type="button" class="iigqs-manage-quickbtn" id="iigqs-ctx-pin-none">Снять всё</button>
+                </div>
+            `;
+            const groups = blocks.map(b => `
+                <div class="iigqs-subtitle">${esc(b.name || 'Блок')}</div>
+                ${b.context.filter(it => it && it.id).map(it => `
+                    <label class="iigqs-manage-item">
+                        <input type="checkbox" class="iigqs-ctx-pin" data-ctx-key="${esc(ctxKey(b, it))}" ${pinned.includes(ctxKey(b, it)) ? 'checked' : ''}>
+                        <span class="${it.disabled ? 'iigqs-off' : ''}">${esc(ctxItemLabel(it))}</span>
+                    </label>
+                `).join('')}
+            `).join('');
+            return `${header(' — выбор')}${quickActions}<div class="iigqs-manage-list">${groups}</div>`;
+        }
+
+        const pinned = getPinnedCtxKeys();
+        // Только блоки, у которых есть закреплённые тоглы — именно они становятся вкладками.
+        const tabBlocks = blocks
+            .map((b, bi) => ({ b, bi, items: b.context.filter(it => it && it.id && pinned.includes(ctxKey(b, it))) }))
+            .filter(x => x.items.length);
+
+        if (!tabBlocks.length) {
+            return `${header()}<div class="iigqs-hint">Ни один тогл ещё не выбран — нажми ⚙ и отметь нужные из «Context Items» своих блоков.</div>`;
+        }
+
+        const store = getQsStore();
+        let active = tabBlocks.find(x => x.b.id === (store && store.ctxTab)) || tabBlocks[0];
+        ctxActiveTab = active.b.id;
+
+        const dotColor = (bi) => CTX_DOT_COLORS[bi % CTX_DOT_COLORS.length];
+
+        const tabsHtml = tabBlocks.length > 1 ? `
+            <div class="iigqs-tabs">
+                ${tabBlocks.map(x => `
+                    <button type="button" class="iigqs-tab ${x === active ? 'iigqs-tab-sel' : ''} ${x.b.disabled ? 'iigqs-dim' : ''}"
+                        data-ctx-tab="${esc(x.b.id)}" title="${esc(x.b.name || 'Блок')}">
+                        <span class="iigqs-dot" style="background:${dotColor(x.bi)}"></span><span class="iigqs-tab-name">${esc(x.b.name || 'Блок')}</span>
+                        <span class="iigqs-tab-count">${x.items.filter(it => !it.disabled).length}/${x.items.length}</span>
+                    </button>
+                `).join('')}
+            </div>
+        ` : `
+            <div class="iigqs-subtitle ${active.b.disabled ? 'iigqs-off' : ''}">${esc(active.b.name || 'Блок')}${active.b.disabled ? ' (выкл)' : ''}</div>
+        `;
+
+        const chipsHtml = `
+            <div class="iigqs-chips">
+                ${active.items.map(it => `<button type="button" class="iigqs-chip ${!it.disabled ? 'iigqs-active' : ''} ${active.b.disabled ? 'iigqs-dim' : ''}"
+                    data-ctx-block-id="${esc(active.b.id)}" data-ctx-item-id="${esc(it.id)}" title="${esc(active.b.name || 'Блок')} → ${esc(ctxItemLabel(it))}">${esc(ctxItemLabel(it))}</button>`).join('')}
+            </div>
+        `;
+
+        return `${header()}${tabsHtml}${chipsHtml}`;
     }
 
     function positionPanelNearFab() {
@@ -903,6 +1054,53 @@
                 const store = getQsStore();
                 if (!store) return;
                 store.pinnedExtBlocks = [];
+                saveSettings();
+                refreshPanel();
+            });
+        }
+
+        // Чипы тоглов блоков (Context Items) — тап = вкл/выкл тогл, панель остаётся открытой.
+        panel.querySelectorAll('.iigqs-chip[data-ctx-item-id]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const ebSettings = getExtBlocksSettings();
+                const block = getActiveSetBlocks(ebSettings).find(b => b.id === btn.dataset.ctxBlockId);
+                const item = block && Array.isArray(block.context)
+                    ? block.context.find(it => it.id === btn.dataset.ctxItemId) : null;
+                if (!block || !item) { toast('Тогл не найден в текущем наборе', 'error'); return; }
+                toggleContextItem(block, item);
+                toast(`${ctxItemLabel(item)}: ${item.disabled ? 'выключен' : 'включён'}`, 'success');
+                refreshPanel();
+            });
+        });
+
+        panel.querySelectorAll('.iigqs-tab[data-ctx-tab]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const store = getQsStore();
+                if (store) { store.ctxTab = btn.dataset.ctxTab; saveSettings(); }
+                refreshPanel();
+            });
+        });
+
+        const ctxManageToggle = panel.querySelector('#iigqs-ctx-manage-toggle');
+        if (ctxManageToggle) {
+            ctxManageToggle.addEventListener('click', () => {
+                manageCtxOpen = !manageCtxOpen;
+                refreshPanel();
+            });
+        }
+
+        panel.querySelectorAll('.iigqs-ctx-pin').forEach(cb => {
+            cb.addEventListener('change', () => {
+                togglePinCtx(cb.dataset.ctxKey);
+            });
+        });
+
+        const ctxPinNoneBtn = panel.querySelector('#iigqs-ctx-pin-none');
+        if (ctxPinNoneBtn) {
+            ctxPinNoneBtn.addEventListener('click', () => {
+                const store = getQsStore();
+                if (!store) return;
+                store.pinnedContextItems = [];
                 saveSettings();
                 refreshPanel();
             });
