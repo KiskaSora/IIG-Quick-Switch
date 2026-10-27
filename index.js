@@ -1207,8 +1207,113 @@
         fab.addEventListener('pointercancel', () => { dragging = false; });
     }
 
+    // ── Цвет лапки: берём из темы, но только если он читаем на её фоне ──
+    // Раньше брали QuoteColor/EmColor вслепую: в части тем один из них тёмный
+    // или прозрачный → лапка становилась чёрной. Теперь кандидаты проверяются
+    // на контраст с фоном темы; негодные отбрасываются, и при необходимости
+    // подставляется розово-сиреневый запасной цвет.
+    let _colorCtx = null;
+
+    function parseColor(str) {
+        // → {r,g,b,a} (a 0..1) или null, если строка не цвет
+        if (!str) return null;
+        str = String(str).trim();
+        if (!str) return null;
+        try {
+            if (!_colorCtx) {
+                const cv = document.createElement('canvas');
+                cv.width = cv.height = 1;
+                _colorCtx = cv.getContext('2d', { willReadFrequently: true });
+            }
+            _colorCtx.clearRect(0, 0, 1, 1);
+            _colorCtx.fillStyle = '#010203';
+            _colorCtx.fillStyle = str;
+            if (_colorCtx.fillStyle === '#010203') return null; // невалидный цвет
+            _colorCtx.fillRect(0, 0, 1, 1);
+            const d = _colorCtx.getImageData(0, 0, 1, 1).data;
+            return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
+        } catch (e) { return null; }
+    }
+
+    function relLuminance({ r, g, b }) {
+        const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    }
+
+    function contrastRatio(l1, l2) {
+        const hi = Math.max(l1, l2), lo = Math.min(l1, l2);
+        return (hi + 0.05) / (lo + 0.05);
+    }
+
+    let _lastAccentKey = '';
+
+    function updateAccentColors() {
+        try {
+            const cs = getComputedStyle(document.documentElement);
+            const getVar = (name) => parseColor(cs.getPropertyValue(name));
+
+            const body = getVar('--SmartThemeBodyColor');
+            const bodyLum = body ? relLuminance(body) : 0.8;
+
+            // Фон под лапкой: тинт чата/интерфейса, если он достаточно непрозрачен;
+            // иначе (обои сквозь прозрачный тинт) угадываем по цвету основного текста.
+            let bgLum = bodyLum > 0.45 ? 0.02 : 0.9;
+            for (const name of ['--SmartThemeChatTintColor', '--SmartThemeBlurTintColor']) {
+                const col = getVar(name);
+                if (col && col.a >= 0.5) { bgLum = relLuminance(col); break; }
+            }
+
+            const rgb = (c) => `rgb(${c.r}, ${c.g}, ${c.b})`;
+            const good = [];
+            for (const name of ['--SmartThemeQuoteColor', '--SmartThemeEmColor', '--SmartThemeUnderlineColor']) {
+                const col = getVar(name);
+                if (!col || col.a < 0.5) continue;                       // прозрачный
+                if (contrastRatio(relLuminance(col), bgLum) < 3) continue; // сливается с фоном
+                if (good.some((g) => Math.abs(g.r - col.r) + Math.abs(g.g - col.g) + Math.abs(g.b - col.b) < 40)) continue; // дубль
+                good.push(col);
+            }
+
+            const lightBg = bgLum > 0.45;
+            const fb = lightBg ? ['#c2338c', '#7a4fd6'] : ['#ff7ac6', '#b98bff'];
+            const a = good[0] ? rgb(good[0]) : fb[0];
+            const b = good[1] ? rgb(good[1]) : (good[0] ? rgb(good[0]) : fb[1]);
+
+            const key = a + '|' + b;
+            if (key === _lastAccentKey) return;
+            _lastAccentKey = key;
+
+            let st = document.getElementById('iigqs-accent-vars');
+            if (!st) {
+                st = document.createElement('style');
+                st.id = 'iigqs-accent-vars';
+                document.head.appendChild(st);
+            }
+            st.textContent = `html:root { --iigqs-accent: ${a}; --iigqs-accent-2: ${b}; }`;
+        } catch (e) { console.warn('[IIG-QS] accent update failed', e); }
+    }
+
+    let _accentWatching = false;
+    function watchAccent() {
+        updateAccentColors();
+        if (_accentWatching) return;
+        _accentWatching = true;
+        // ST ставит цвета темы инлайном на <html> — ловим смену темы сразу…
+        try {
+            let t = null;
+            new MutationObserver(() => {
+                clearTimeout(t);
+                t = setTimeout(updateAccentColors, 120);
+            }).observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
+        } catch (e) { /* ignore */ }
+        // …и страхуемся редкой проверкой (темы, задающие цвета через CSS, а не инлайн).
+        // На скрытой вкладке не работаем (экономим батарею), при возврате проверяем сразу.
+        setInterval(() => { if (!document.hidden) updateAccentColors(); }, 5000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) updateAccentColors(); });
+    }
+
     // ── Инициализация ──
     function boot() {
+        try { watchAccent(); } catch (e) { console.error('[IIG-QS] accent init failed', e); }
         try { injectFab(); } catch (e) { console.error('[IIG-QS] init failed', e); }
     }
 

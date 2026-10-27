@@ -1,7 +1,7 @@
-/* Акцент не зашит намертво, а берётся из переменных активной темы SillyTavern
-   (--SmartThemeQuoteColor / --SmartThemeEmColor), так что цвет виджета сам
-   меняется вместе со сменой темы в настройках ST. Розово-сиреневый — это лишь
-   fallback на случай, если в теме эти переменные не заданы. */
+/* Акцент берётся из переменных активной темы SillyTavern, но index.js проверяет
+   их на контраст с фоном и перезаписывает --iigqs-accent / --iigqs-accent-2
+   (через <style id="iigqs-accent-vars">), если цвет тёмный/прозрачный.
+   Значения ниже — лишь стартовый fallback до первой проверки. */
 
 :root {
     --iigqs-accent: var(--SmartThemeQuoteColor, #ff7ac6);
@@ -27,19 +27,25 @@
     border: none;
     box-shadow: none;
     cursor: grab;
-    opacity: 0.7;
+    opacity: 0.9;
     transition: opacity 0.15s ease, transform 0.1s ease;
     touch-action: none;
     user-select: none;
-    filter: drop-shadow(0 1px 4px color-mix(in srgb, var(--iigqs-accent-2) 55%, black));
+    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--iigqs-accent-2) 60%, transparent));
 }
 
-.iigqs-fab i {
+/* Сплошной цвет вместо градиента через background-clip:text — этот приём
+   на иконках FontAwesome ломается в части тем/браузеров (глиф остаётся тёмным).
+   Высокая специфичность + !important, чтобы кастомный CSS темы не перебил. */
+#iigqs-fab.iigqs-fab i.fa-solid,
+#iigqs-fab.iigqs-fab i.fa-solid::before {
     font-size: 22px;
-    background: var(--iigqs-accent-grad);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--iigqs-accent) !important;
+    -webkit-text-fill-color: var(--iigqs-accent) !important;
+    background: none !important;
+    -webkit-background-clip: border-box !important;
+    background-clip: border-box !important;
+    text-shadow: none !important;
 }
 
 .iigqs-fab:hover,
